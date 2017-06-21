@@ -1,0 +1,5 @@
+# This is a comment
+#sleep 1
+sendCommandGetResp_RN sys get ver
+sendCommandGetResp_RN radio get freq
+sendCommandGetResp_RN radio get pwr
