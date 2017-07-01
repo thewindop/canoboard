@@ -1,33 +1,33 @@
 /*
-   ============================================================================
-   Name        : wm_refCodec_Dt00.c
-   Author      : Andy Maginnis
-   Version     : 1
-   Copyright   : MIT (See below)
-   Description : Reference for data format
-   ============================================================================
+ ============================================================================
+ Name        : wm_refCodec_Dt00.c
+ Author      : Andy Maginnis
+ Version     : 1
+ Copyright   : MIT (See below)
+ Description : Reference for data format
+ ============================================================================
 
-   MIT License
+ MIT License
 
-   Copyright (c) 2017 Andy Maginnis
+ Copyright (c) 2017 Andy Maginnis
 
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
 
-   The above copyright notice and this permission notice shall be included in all
-   copies or substantial portions of the Software.
+ The above copyright notice and this permission notice shall be included in all
+ copies or substantial portions of the Software.
 
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-   SOFTWARE.
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ SOFTWARE.
 
  */
 
@@ -37,7 +37,9 @@
 #define READINGS_BUFFER_SIZE     30
 #define BYTEBUFFERSIZE           1000 // Note this example has no byte overrun protection
 
-#define WINDOPDATAPACKET_T1_TYPE 0x02
+#define WINDOPDATAPACKET_T3_TYPE 0x02
+#define WINDOPDATAPACKET_T4_TYPE 0x03
+#define WINDOPDATAPACKET_T5_TYPE 0x04
 
 //*****************************************************************************
 //
@@ -67,7 +69,7 @@ typedef struct Calendar {
  * Define struct of reading types
  *
  * */
-typedef struct WindOpDataPacket_t1 {
+typedef struct WindOpDataPacket_t3 {
     uint16_t ws; // Average minute windspeed
     uint16_t wsx; // Second max speed windspeed
     uint16_t wsm; // Second min windspeed
@@ -76,7 +78,26 @@ typedef struct WindOpDataPacket_t1 {
     uint16_t press; // Pressure
     uint16_t hum; // Humidity
     uint16_t bv; // Battery Voltage
-} WindOpDataPacket_t1;
+} WindOpDataPacket_t3;
+
+
+/*
+ * Optional data structs that can be used.
+ *
+ * */
+typedef struct WindOpDataPacket_t4 {
+    uint16_t ws; // Average minute windspeed
+    uint16_t wsx; // Second max speed windspeed
+    uint16_t wsm; // Second min windspeed
+    uint16_t wd;  // Wind direction
+} WindOpDataPacket_t4;
+
+typedef struct WindOpDataPacket_t5 {
+    int16_t tmp; // temperature
+    uint16_t press; // Pressure
+    uint16_t hum; // Humidity
+    uint16_t bv; // Battery Voltage
+} WindOpDataPacket_t5;
 
 /* ****************************************************************************
  *
@@ -85,12 +106,15 @@ typedef struct WindOpDataPacket_t1 {
  * */
 typedef struct packCtrl {
     Calendar time;
-    WindOpDataPacket_t1 readings[READINGS_BUFFER_SIZE];
     uint8_t incSeconds;
     uint8_t numOfReadings;
     uint8_t extendedTimeFormat;
     uint8_t dataType;
     uint8_t packetLength;
+
+    // Note as T3 & T4 are subsets we simple reuse the T2 structure.
+    //
+    WindOpDataPacket_t3 readings[READINGS_BUFFER_SIZE];
 
 } packCtrl;
 
@@ -106,7 +130,7 @@ void dump_StrWithBreaker(char * str) {
     dump_breaker();
 }
 
-void dump_WindOpDataReadings_t1(WindOpDataPacket_t1 * readingsIn) {
+void dump_WindOpDataReadings_t3(WindOpDataPacket_t3 * readingsIn) {
     printf("ws  %d\n", readingsIn->ws);
     printf("wsx %d\n", readingsIn->wsx);
     printf("wsx %d\n", readingsIn->wsm);
@@ -139,15 +163,22 @@ uint16_t testValue(char * str, uint16_t v1, uint16_t v2) {
     }
 }
 
-uint16_t test_WindOpDataReadings_t1(WindOpDataPacket_t1 * readingsIn1, WindOpDataPacket_t1 * readingsIn2) {
-    uint16_t error = testValue("ws ", readingsIn1->ws, readingsIn2->ws);
-    error += testValue("wsx", readingsIn1->wsx, readingsIn2->wsx);
-    error += testValue("wsx", readingsIn1->wsm, readingsIn2->wsm);
-    error += testValue("wd ", readingsIn1->wd, readingsIn2->wd);
-    error += testValue("tmp", readingsIn1->tmp, readingsIn2->tmp);
-    error += testValue("prs", readingsIn1->press, readingsIn2->press);
-    error += testValue("hum", readingsIn1->hum, readingsIn2->hum);
-    error += testValue("bv ", readingsIn1->bv, readingsIn2->bv);
+uint16_t test_WindOpDataReadings(WindOpDataPacket_t3 * readingsIn1, WindOpDataPacket_t3 * readingsIn2, uint8_t dataType) {
+    uint16_t error = 0;
+
+    if ((dataType == WINDOPDATAPACKET_T3_TYPE) | (dataType == WINDOPDATAPACKET_T4_TYPE)) {
+
+        error += testValue("ws ", readingsIn1->ws, readingsIn2->ws);
+        error += testValue("wsx", readingsIn1->wsx, readingsIn2->wsx);
+        error += testValue("wsx", readingsIn1->wsm, readingsIn2->wsm);
+        error += testValue("wd ", readingsIn1->wd, readingsIn2->wd);
+    }
+    if ((dataType == WINDOPDATAPACKET_T3_TYPE) | (dataType == WINDOPDATAPACKET_T5_TYPE)) {
+        error += testValue("tmp", readingsIn1->tmp, readingsIn2->tmp);
+        error += testValue("prs", readingsIn1->press, readingsIn2->press);
+        error += testValue("hum", readingsIn1->hum, readingsIn2->hum);
+        error += testValue("bv ", readingsIn1->bv, readingsIn2->bv);
+    }
     return error;
 }
 
@@ -176,7 +207,7 @@ void setExampleTime(Calendar * timeStr, uint16_t yy, uint16_t mm, uint16_t dd, u
 /* ****************************************************************************
  * Set data point helper function
  * */
-void setdataPoint(WindOpDataPacket_t1 * data, uint16_t ws, uint16_t wsx, uint16_t wsm) {
+void setdataPoint(WindOpDataPacket_t3 * data, uint16_t ws, uint16_t wsx, uint16_t wsm) {
     data->bv = 12034;
     data->hum = 0x551f;
     data->tmp = 0x1234;
@@ -273,7 +304,7 @@ uint16_t unpack_WindOpMinuteTime(Calendar * timeIn, uint8_t * outBuffer) {
 
     if ((outBuffer[3] & 0x80) == 0x80) {
         timeIn->Year += (outBuffer[4] & 0xC0) << 5;
-        timeIn->Seconds += outBuffer[4] & 0x3F;
+        timeIn->Seconds = outBuffer[4] & 0x3F;
         return 5;
     } else {
         return 4;
@@ -285,7 +316,7 @@ uint16_t unpack_WindOpMinuteTime(Calendar * timeIn, uint8_t * outBuffer) {
  * Pack a data reading.
  *
  * */
-uint16_t pack_WindOpDataReadings_t1(struct WindOpDataPacket_t1 * readingsIn, uint8_t * outBuffer) {
+uint16_t pack_WindOpDataReadings_t3(struct WindOpDataPacket_t3 * readingsIn, uint8_t * outBuffer) {
     outBuffer[0] = readingsIn->ws & 0x00FF;            // LSB Wind speed, Average over 1 minute
     outBuffer[1] = (readingsIn->ws & 0xFF00) >> 8;     // MSB
     outBuffer[2] = readingsIn->wsx & 0x00FF;           // Wind speed max measured over 1 second
@@ -305,13 +336,38 @@ uint16_t pack_WindOpDataReadings_t1(struct WindOpDataPacket_t1 * readingsIn, uin
 
     return 16;
 }
+uint16_t pack_WindOpDataReadings_t4(struct WindOpDataPacket_t3 * readingsIn, uint8_t * outBuffer) {
+    outBuffer[0] = readingsIn->ws & 0x00FF;            // LSB Wind speed, Average over 1 minute
+    outBuffer[1] = (readingsIn->ws & 0xFF00) >> 8;     // MSB
+    outBuffer[2] = readingsIn->wsx & 0x00FF;           // Wind speed max measured over 1 second
+    outBuffer[3] = (readingsIn->wsx & 0xFF00) >> 8;    // during the last averaging period
+    outBuffer[4] = readingsIn->wsm & 0x00FF;           // Wind speed min measured over 1 second
+    outBuffer[5] = (readingsIn->wsm & 0xFF00) >> 8;    // during the last averaging period
+    outBuffer[6] = readingsIn->wd & 0x00FF;            // Wind Direction
+    outBuffer[7] = (readingsIn->wd & 0xFF00) >> 8;     //
+
+    return 8;
+}
+
+uint16_t pack_WindOpDataReadings_t5(struct WindOpDataPacket_t3 * readingsIn, uint8_t * outBuffer) {
+    outBuffer[0] = readingsIn->tmp & 0x00FF;          // Temperature
+    outBuffer[1] = (readingsIn->tmp & 0xFF00) >> 8;   //
+    outBuffer[2] = readingsIn->press & 0x00FF;        // Pressure
+    outBuffer[3] = (readingsIn->press & 0xFF00) >> 8; //
+    outBuffer[4] = readingsIn->hum & 0x00FF;          // Humidity
+    outBuffer[5] = (readingsIn->hum & 0xFF00) >> 8;   //
+    outBuffer[6] = readingsIn->bv & 0x00FF;           // Battery voltage
+    outBuffer[7] = (readingsIn->bv & 0xFF00) >> 8;    //
+
+    return 8;
+}
 
 /* ****************************************************************************
  *
  * Reverse the PACK
  *
  * */
-uint16_t unpack_WindOpDataReadings_t1(struct WindOpDataPacket_t1 * readingsIn, uint8_t * outBuffer) {
+uint16_t unpack_WindOpDataReadings_t3(struct WindOpDataPacket_t3 * readingsIn, uint8_t * outBuffer) {
     readingsIn->ws = ((outBuffer[1] & 0xFF) << 8) + (outBuffer[0] & 0xFF);
     readingsIn->wsx = ((outBuffer[3] & 0xFF) << 8) + (outBuffer[2] & 0xFF);
     readingsIn->wsm = ((outBuffer[5] & 0xFF) << 8) + (outBuffer[4] & 0xFF);
@@ -323,17 +379,33 @@ uint16_t unpack_WindOpDataReadings_t1(struct WindOpDataPacket_t1 * readingsIn, u
     return 16;
 }
 
+uint16_t unpack_WindOpDataReadings_t4(struct WindOpDataPacket_t3 * readingsIn, uint8_t * outBuffer) {
+    readingsIn->ws = ((outBuffer[1] & 0xFF) << 8) + (outBuffer[0] & 0xFF);
+    readingsIn->wsx = ((outBuffer[3] & 0xFF) << 8) + (outBuffer[2] & 0xFF);
+    readingsIn->wsm = ((outBuffer[5] & 0xFF) << 8) + (outBuffer[4] & 0xFF);
+    readingsIn->wd = ((outBuffer[7] & 0xFF) << 8) + (outBuffer[6] & 0xFF);
+    return 8;
+}
+
+uint16_t unpack_WindOpDataReadings_t5(struct WindOpDataPacket_t3 * readingsIn, uint8_t * outBuffer) {
+    readingsIn->tmp = ((outBuffer[1] & 0xFF) << 8) + (outBuffer[0] & 0xFF);
+    readingsIn->press = ((outBuffer[3] & 0xFF) << 8) + (outBuffer[2] & 0xFF);
+    readingsIn->hum = ((outBuffer[5] & 0xFF) << 8) + (outBuffer[4] & 0xFF);
+    readingsIn->bv = ((outBuffer[7] & 0xFF) << 8) + (outBuffer[6] & 0xFF);
+    return 8;
+}
+
 /* ****************************************************************************
  *
  * Full packet packing procedure.
  *
  * */
-uint16_t pack_WindOpDataPacket_t1(struct packCtrl * pack, uint8_t * outBuffer) {
+uint16_t pack_WindOpDataPacket(struct packCtrl * pack, uint8_t * outBuffer) {
     uint8_t i;
     uint8_t * bufferSize;
 
     // Write the packet type
-    outBuffer[0] = WINDOPDATAPACKET_T1_TYPE;
+    outBuffer[0] = pack->dataType;
 
     bufferSize = &outBuffer[1]; // Create a pointer to the BufferSize location
     *bufferSize = 2;            // Set the size as the packet so far
@@ -344,7 +416,19 @@ uint16_t pack_WindOpDataPacket_t1(struct packCtrl * pack, uint8_t * outBuffer) {
     // Iterate over the readings adding them to the byte buffer
     for (i = 0; i < pack->numOfReadings; i++) {
         printf("Buffer %3d start location is %4d\n", i, *bufferSize);
-        *bufferSize += pack_WindOpDataReadings_t1(&pack->readings[i], &outBuffer[*bufferSize]);
+        switch (pack->dataType) {
+        case WINDOPDATAPACKET_T3_TYPE:
+            *bufferSize += pack_WindOpDataReadings_t3(&pack->readings[i], &outBuffer[*bufferSize]);
+            break;
+        case WINDOPDATAPACKET_T4_TYPE:
+            *bufferSize += pack_WindOpDataReadings_t4(&pack->readings[i], &outBuffer[*bufferSize]);
+            break;
+        case WINDOPDATAPACKET_T5_TYPE:
+            *bufferSize += pack_WindOpDataReadings_t5(&pack->readings[i], &outBuffer[*bufferSize]);
+            break;
+        default:
+            printf("ERROR data type %d is not supported\n", pack->dataType);
+        }
     }
 
     return *bufferSize; // This contains the packet length
@@ -355,11 +439,12 @@ uint16_t pack_WindOpDataPacket_t1(struct packCtrl * pack, uint8_t * outBuffer) {
  * The unpack
  *
  * */
-uint16_t unpack_WindOpDataPacket_t1(struct packCtrl * pack, uint8_t * outBuffer) {
+uint16_t unpack_WindOpDataPacket(struct packCtrl * pack, uint8_t * outBuffer) {
     uint8_t i;
     uint8_t bufferSize;
     uint8_t bufferAddress;
 
+    pack->dataType = outBuffer[0];
     bufferSize = outBuffer[1];
 
     bufferAddress = 2;
@@ -368,7 +453,19 @@ uint16_t unpack_WindOpDataPacket_t1(struct packCtrl * pack, uint8_t * outBuffer)
     i = 0;
     while (bufferAddress < bufferSize) {
         printf("Buffer %3d location is %4d Size: %4d\n", i, bufferAddress, bufferSize);
-        bufferAddress += unpack_WindOpDataReadings_t1(&pack->readings[i++], &outBuffer[bufferAddress]);
+        switch (pack->dataType) {
+        case WINDOPDATAPACKET_T3_TYPE:
+            bufferAddress += unpack_WindOpDataReadings_t3(&pack->readings[i++], &outBuffer[bufferAddress]);
+            break;
+        case WINDOPDATAPACKET_T4_TYPE:
+            bufferAddress += unpack_WindOpDataReadings_t4(&pack->readings[i++], &outBuffer[bufferAddress]);
+            break;
+        case WINDOPDATAPACKET_T5_TYPE:
+            bufferAddress += unpack_WindOpDataReadings_t5(&pack->readings[i++], &outBuffer[bufferAddress]);
+            break;
+        default:
+            printf("ERROR data type %d is not supported\n", pack->dataType);
+        }
     }
 
     return i; // return the number of received packets
@@ -402,7 +499,7 @@ uint16_t runTest(struct testCtrl * tstCtrl) {
     uint8_t byteBuffer[BYTEBUFFERSIZE];
 
     dump_StrWithBreaker("Pack data");
-    bufferLength = pack_WindOpDataPacket_t1(&tstCtrl->dataIn, byteBuffer);
+    bufferLength = pack_WindOpDataPacket(&tstCtrl->dataIn, byteBuffer);
 
     dump_StrWithBreaker("Data buffer displayed as Byte HEX string");
     for (i = 0; i < bufferLength; i++) {
@@ -411,13 +508,13 @@ uint16_t runTest(struct testCtrl * tstCtrl) {
     printf("\n");
 
     dump_StrWithBreaker("UN - pack data");
-    unpackedBuffers = unpack_WindOpDataPacket_t1(&tstCtrl->dataOut, byteBuffer);
+    unpackedBuffers = unpack_WindOpDataPacket(&tstCtrl->dataOut, byteBuffer);
 
     dump_StrWithBreaker("Test times and buffer data");
     uint16_t error = test_WindOpMinuteTime(&tstCtrl->dataIn.time, &tstCtrl->dataOut.time);
     for (i = 0; i < unpackedBuffers; i++) {
         printf("************************* Buffer %d\n", i);
-        error += test_WindOpDataReadings_t1(&tstCtrl->dataIn.readings[i], &tstCtrl->dataOut.readings[i]);
+        error += test_WindOpDataReadings(&tstCtrl->dataIn.readings[i], &tstCtrl->dataOut.readings[i], tstCtrl->dataIn.dataType);
     }
 
     return error;
@@ -444,7 +541,8 @@ int main(void) {
     setdataPoint(&tstCtrl.dataIn.readings[0], 5000, 5500, 4500);
     setdataPoint(&tstCtrl.dataIn.readings[1], 6000, 6500, 5500);
     tstCtrl.dataIn.incSeconds = 0;
-    tstCtrl.dataIn.numOfReadings = 2;
+    tstCtrl.dataIn.dataType = WINDOPDATAPACKET_T4_TYPE;
+    tstCtrl.dataIn.numOfReadings = 3;
 
     error += runTest(&tstCtrl);
 
@@ -454,7 +552,19 @@ int main(void) {
     setdataPoint(&tstCtrl.dataIn.readings[1], 6000, 6500, 5500);
     setdataPoint(&tstCtrl.dataIn.readings[12], 1234, 1111, 2222);
     tstCtrl.dataIn.incSeconds = 1;
-    tstCtrl.dataIn.numOfReadings = 13;
+    tstCtrl.dataIn.dataType = WINDOPDATAPACKET_T3_TYPE;
+    tstCtrl.dataIn.numOfReadings = 2;
+
+    error += runTest(&tstCtrl);
+
+    dump_StrWithBreaker("Extended second time format");
+    setExampleTime(&tstCtrl.dataIn.time, 2017, 12, 1, 12, 30, 12);
+    setdataPoint(&tstCtrl.dataIn.readings[0], 5000, 5500, 4500);
+    setdataPoint(&tstCtrl.dataIn.readings[1], 6000, 6500, 5500);
+    setdataPoint(&tstCtrl.dataIn.readings[12], 1234, 1111, 2222);
+    tstCtrl.dataIn.incSeconds = 1;
+    tstCtrl.dataIn.dataType = WINDOPDATAPACKET_T5_TYPE;
+    tstCtrl.dataIn.numOfReadings = 1;
 
     error += runTest(&tstCtrl);
 
