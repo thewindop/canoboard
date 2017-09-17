@@ -54,6 +54,7 @@ use Getopt::Long;
 use Data::Dumper;
 use DateTime;
 use JSON; 
+use FindBin qw($Bin);
 
 ##-----------------------------------------------------------------------------
 ## Script start
@@ -82,7 +83,9 @@ if ($cfgRef->{listDevices}) {
       print Dumper $ttnDataRef if($cfgRef->{dump});
 
       # Remove and replace this next call for non wind op TTN use
-      runWindOpUnpack($ttnDataRef, $cfgRef) if($cfgRef->{runWm});
+      my $outFile = runWindOpUnpack($ttnDataRef, $cfgRef) if($cfgRef->{runWm});
+
+      plotData($outFile) if($cfgRef->{plot});
 
       my $dt2 = DateTime->now( time_zone => 'UTC' ) - $dt1;
 
@@ -105,6 +108,8 @@ sub processCommandLine {
    $cfg{outdirectory} = "/Users/$username/windop/ttn/wmOutData/";
    $cfg{help}         = 0;
    $cfg{info}         = 0;
+   $cfg{quiet}        = 0;
+   $cfg{plot}         = 0;
    $cfg{dump}         = 0;
    $cfg{runWm}        = 0;
    $cfg{curl}         = 0;
@@ -117,6 +122,8 @@ sub processCommandLine {
     "outdirectory=s" => \$cfg{outdirectory},# 
     "ttnkeysFile=s"  => \$cfg{ttnkeys},     # 
     "help"           => \$cfg{help},        # 
+    "quiet"          => \$cfg{quiet},       # 
+    "plot"           => \$cfg{plot},        # 
     "curl"           => \$cfg{curl},        # 
     "runWm"          => \$cfg{runWm},       # 
     "info"           => \$cfg{info},        # 
@@ -135,6 +142,8 @@ sub processCommandLine {
       -ttnkeysFile=s         : File to the TTN keys required by SWAGGER. You must create & populate this.
                                Defaults to a file in your HOME directory
                                $cfg{ttnkeys}
+      -quiet                 : Dont print the data decode statements
+      -plot                  : Call the s3 python plot script on the downloaded data.
       -dump                  : Dumps the packet data info & working data Hash. 
       -help                  : Prints this
       -info                  : Prints script dev info
@@ -217,7 +226,7 @@ sub runWindOpUnpack {
 
    print Dumper \%resHash if($cfgRef->{dump});
 
-   generateCsvOutput($cfgRef, \%resHash);
+   return generateCsvOutput($cfgRef, \%resHash);
 
 }
 
@@ -241,7 +250,7 @@ sub generateCsvOutput {
         $oFormat .= (exists $hRef->{$time}{bv})   ? "$hRef->{$time}{bv},"   : ",";
         $oFormat .= "\n";
      }
-     print ("$oFormat\n");
+     print ("$oFormat\n") if (! $cfgRef->{quiet});
 
      if ( !-e $cfgRef->{outdirectory} ) {
         make_path($cfgRef->{outdirectory});
@@ -253,6 +262,8 @@ sub generateCsvOutput {
      $csvFName    .= ".csv";
      printf("Writing data to $csvFName\n");
      writeToFile( $csvFName, $oFormat);
+
+     return $csvFName;
 
 }
 
@@ -483,6 +494,16 @@ sub queryTtndReturnHashRef {
      ## Convert the JSON string to a PERL data structure
      return decode_json( $jsonStr );
 
+}
+
+##-----------------------------------------------------------------------------
+## This function fetchs the data from the TTN 
+##-----------------------------------------------------------------------------
+sub plotData {
+  my ( $outFile ) = @_;
+  my $command = "python $Bin/s3_wm_csv_plot.py -c $outFile";
+  print("$command\n");
+  runOsCommandGetOutput($command);
 }
 
 ##-----------------------------------------------------------------------------
