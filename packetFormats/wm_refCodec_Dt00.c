@@ -40,6 +40,7 @@
 #define WINDOPDATAPACKET_T3_TYPE 0x02
 #define WINDOPDATAPACKET_T4_TYPE 0x03
 #define WINDOPDATAPACKET_T5_TYPE 0x04
+#define WINDOPDATAPACKET_T6_TYPE 0x06
 
 //*****************************************************************************
 //
@@ -425,6 +426,9 @@ uint16_t pack_WindOpDataPacket(struct packCtrl * pack, uint8_t * outBuffer) {
             break;
         case WINDOPDATAPACKET_T5_TYPE:
             *bufferSize += pack_WindOpDataReadings_t5(&pack->readings[i], &outBuffer[*bufferSize]);
+            break;
+        case WINDOPDATAPACKET_T6_TYPE:
+            *bufferSize += pack_WindOpDataReadings_t6(&pack->readings[i], &outBuffer[*bufferSize]);
             break;
         default:
             printf("ERROR data type %d is not supported\n", pack->dataType);

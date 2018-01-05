@@ -42,20 +42,22 @@ import pandas as pd
 from   datetime import datetime
 import numpy as np
 import sys, getopt
+import dateutil.parser
 
 def main(argv):
 
    ##--------------------------------------------------------------------------
    ## Variables
    ##--------------------------------------------------------------------------
-   csvFile = ''
+   csvFile   = ''
+   series    = 1 
    plotTitle = "LoRa WM data feed"
 
    ##--------------------------------------------------------------------------
    ## Commandline
    ##--------------------------------------------------------------------------
    try:
-      opts, args = getopt.getopt(argv,"hc:",["csvFile="])
+      opts, args = getopt.getopt(argv,"hc:s:",["csvFile=","series"])
    except getopt.GetoptError:
       print ('s3_wm_csv_plot.py -c <csvfile>')
       sys.exit(2)
@@ -65,7 +67,9 @@ def main(argv):
          sys.exit()
       elif opt in ("-c", "--csvFile"):
          csvFile = arg
-   print ('Input file is ', csvFile)
+      elif opt in ("-s", "--series"):
+         series = int(arg)
+   print ('Input file is ' +  csvFile + ' Series is ' + str(series))
    
    ##--------------------------------------------------------------------------
    ## Plot
@@ -81,14 +85,24 @@ def main(argv):
    # replace the time key with a time string so the to_dateTime call works
    # We dont need it.
    df.loc[0,0] = df.values[1,0]
-   df[0] = pd.to_datetime(df[0], format="%Y%m%d%H%M%S")
+
+   ## Adjust time column to be time objects.
+   try:
+      df[0] = pd.to_datetime(df[0], format="%Y%m%d%H%M%S")
+   except ValueError:
+      print ('Time Column is not of format %Y%m%d%H%M%S, Trying ISO time format')
+      try :
+         df[0] = pd.to_datetime(df[0], format="%Y-%m-%dT%H:%M:%S.%fZ")
+      except ValueError:
+         print ("Time Column is not ISO time format %Y-%m-%dT%H:%M:%S.%fZ")
       
-   # Plot the average wind speed with the time as the Y axis
-   plt.plot(df.values[1:dfEndpoint,0], df.values[1:dfEndpoint,1])
+   ## Plot the average wind speed with the time as the Y axis
+   print ("Data loaded, plotting Column " + str(series) + ":" + colKeys[series] + " against time.")
+   plt.plot(df.values[1:dfEndpoint,0], df.values[1:dfEndpoint, series].astype(np.float))
 
    plt.gcf().autofmt_xdate()
    
-   # Create the title and display total data points
+   ## Create the title and display total data points
    plt.ylabel('WindSpeed(mph)')
    perlRocks = "%s (%d datapoints)" % (plotTitle, dfEndpoint)
    plt.title(perlRocks)

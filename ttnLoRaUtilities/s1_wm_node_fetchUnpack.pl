@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 # ============================================================================
-# Name        : s1_wm_ttn_fetchUnpack.pl
+# Name        : s1_wm_stream_fetchUnpack.pl
 # Author      : Andy Maginnis
 # Version     : 1.0.0
 # Copyright   : MIT (See below)
@@ -9,17 +9,6 @@
 #
 # Written in PERL as its avaible on most/all *nix/OSX systems. Minimal 
 # packages required, you may need JSON.
-# This is intended for use in debuging data flow when adding devices to the
-# TTN network. You can pull data using the CURL swagger API, decode the 
-# BASE64 data and dump the resulting data structure.
-# 
-# If you have a windop windmeter you can pull the data for analysis/plotting
-# of to test packet decoding.
-#
-# You can roll your own decode of your device, removing and replacing the 
-# windop code. We could make this more generic and dynamically load modules
-# but at present this is a KISS script to check data is arriving at TTN as 
-# we expect.
 #
 # ============================================================================
 # 
@@ -55,45 +44,33 @@ use Data::Dumper;
 use DateTime;
 use JSON; 
 use FindBin qw($Bin);
+use GIS::Distance;
+
 
 ##-----------------------------------------------------------------------------
 ## Script start
 ##-----------------------------------------------------------------------------
 my $cfgRef = processCommandLine();
 
-if ($cfgRef->{listDevices}) {
+my $noOfPackets = 0 ;
+my $dt1 = DateTime->now( time_zone => 'UTC' );
 
-  print "\n   Avaiable devices are: (JSON List returned)\n\n";
-	print runOsCommandGetOutput(retTtndDevices($cfgRef)) . "\n";
+my $ttnDataRef = unPackNodeCsvFile($cfgRef);
 
-	exit();
+# $noOfPackets += convertAllRawBase64Packets($ttnDataRef);
 
-} else {
+print Dumper $ttnDataRef if($cfgRef->{dump});
 
-   if ($cfgRef->{selectDevice} ne "") {
+my $outFile1 = runWindOpUnpack($ttnDataRef, $cfgRef) if($cfgRef->{runWm});
+# my $outFile2 = unpackStreamMetaData($ttnDataRef, $cfgRef) if($cfgRef->{runWm});
 
-      my $noOfPackets = 0 ;
+# plotData($outFile1) if($cfgRef->{plot});
+# plotData($outFile2) if($cfgRef->{rssi});
 
-      my $dt1 = DateTime->now( time_zone => 'UTC' );
-   
-      my $ttnDataRef = queryTtndReturnHashRef($cfgRef);
+my $dt2 = DateTime->now( time_zone => 'UTC' ) - $dt1;
 
-      $noOfPackets += convertAllRawBase64Packets($ttnDataRef);
+printf("---TTN Fetch&Process %d packets in %ds.\n", $noOfPackets, $dt2->seconds);
 
-      print Dumper $ttnDataRef if($cfgRef->{dump});
-
-      # Remove and replace this next call for non wind op TTN use
-      my $outFile = runWindOpUnpack($ttnDataRef, $cfgRef) if($cfgRef->{runWm});
-
-      plotData($outFile) if($cfgRef->{plot});
-
-      my $dt2 = DateTime->now( time_zone => 'UTC' ) - $dt1;
-
-      printf("---TTN Fetch&Process %d packets in %ds.\n", $noOfPackets, $dt2->seconds);
-
-   } # else do nothing? print help?
-
-}
 
 ##-----------------------------------------------------------------------------
 ## Deal with the command line
@@ -102,25 +79,18 @@ sub processCommandLine {
    my %cfg;
 
    my $username = $ENV{LOGNAME} || $ENV{USER} || getpwuid($<);
-   $cfg{duration}     = "1h";
-   $cfg{listDevices}  = 0;
-   $cfg{selectDevice} = "";
-   $cfg{outdirectory} = "/Users/$username/windop/ttn/wmOutData/";
+   $cfg{outdirectory} = "/Users/$username/windop/stream/wmOutData/";
+   $cfg{file}         = "";
    $cfg{help}         = 0;
    $cfg{info}         = 0;
    $cfg{quiet}        = 0;
    $cfg{plot}         = 0;
    $cfg{dump}         = 0;
    $cfg{runWm}        = 0;
-   $cfg{curl}         = 0;
-   $cfg{ttnkeys}      = "/Users/$username/wm_ttn_fetchUnpack.keys";
 
    GetOptions(
-    "listDevices"    => \$cfg{listDevices}, # List what divices are avaiable 
-    "duration=s"     => \$cfg{duration},    # 1h, 2d etc. As defined by Swagger
-    "selectDevice=s" => \$cfg{selectDevice},# 
     "outdirectory=s" => \$cfg{outdirectory},# 
-    "ttnkeysFile=s"  => \$cfg{ttnkeys},     # 
+    "file=s"         => \$cfg{file},        # 
     "help"           => \$cfg{help},        # 
     "quiet"          => \$cfg{quiet},       # 
     "plot"           => \$cfg{plot},        # 
@@ -134,14 +104,9 @@ sub processCommandLine {
       print "
    TTN data store fetch and unpack script
 
-      -listDevices           : Show devices we can get data for, queries TTN
-      -selectDevice=s        : Get data for a device as shown by listDevices, queries TTN
-      -duration=s            : Duration, 1h, 2d etc. as SWAGGER API
       -outdirectory=s        : Output CSV location, $cfg{outdirectory}
       -runWm                 : Run the WINDOP unpack/CsvGeneration
-      -ttnkeysFile=s         : File to the TTN keys required by SWAGGER. You must create & populate this.
-                               Defaults to a file in your HOME directory
-                               $cfg{ttnkeys}
+
       -quiet                 : Dont print the data decode statements
       -plot                  : Call the s3 python plot script on the downloaded data.
       -dump                  : Dumps the packet data info & working data Hash. 
@@ -150,7 +115,7 @@ sub processCommandLine {
       -curl                  : Show the curl command & exit once run.
 
 ## To fetch and process windop data use,
-wm_ttn_fetchUnpack.pl -sel 00 -dur 3d -runWm
+
 
 ";
       exit();
@@ -159,45 +124,7 @@ wm_ttn_fetchUnpack.pl -sel 00 -dur 3d -runWm
 
    if ($cfg{info}) {
 print '
-
-Using -dump will display the unpacked content of the TTN messages.
-The example below shows the base64 and the decoded string. An array is 
-created containing the byte values of the string in the order 0 -> N
-
->>> wm_ttn_fetchUnpack.pl -sel 00 -dur 10m -dum
-
----Base64 conversion packets = 3 in 0s
----Dev: 00 ID:     0 2017-08-26T11:05:01.371449068Z Type:4
----Dev: 00 ID:     1 2017-08-26T11:05:10.315692426Z Type:5
----Dev: 00 ID:     2 2017-08-26T11:10:22.273853271Z Type:4
----Unpack WM868 data packets = 3 in 0s
-$VAR1 = [
-          {
-            \'\time\' => \'2017-08-26T11:05:01.371449068Z\',
-            \'device_id\' => \'00\',
-            \'decoded\' => \'042ebbd2187e4d01fa01000000010d01fa01000015016201f702fd0067010501fa0100004901a101f702fd004b01\',
-            \'raw\' => \'BC670hh+TQH6AQAAAAENAfoBAAAVAWIB9wL9AGcBBQH6AQAASQGhAfcC/QBLAQ==\',
-            \'bytes\' => [
-                         4,
-                         46,
-                         187,
-                         210,
-                         ..........
-                         36,
-                         1
-                       ]
-          }
-        ];
-$VAR1 = {
-         \'00\' => {
-                                    \'20170826110900\' => {
-                                                          \'ws\' => \'2.95\',
-                                                          \'wsm\' => \'0\',
-                                                          \'wsa\' => \'7.59\',
-                                                          \'wd\' => 299
-                                                        },
-                  }
-        };
+  NA.
 ';
 
       exit();
@@ -256,7 +183,7 @@ sub generateCsvOutput {
         make_path($cfgRef->{outdirectory});
      }
 
-     my $csvFName =  "$cfgRef->{outdirectory}/ttn_data_$cfgRef->{selectDevice}";
+     my $csvFName =  "$cfgRef->{outdirectory}/stream_data_$cfgRef->{selectDevice}";
      $csvFName    .= "_$cfgRef->{duration}";
      $csvFName    .= "_" . getTimeForDataPacket();
      $csvFName    .= ".csv";
@@ -264,6 +191,44 @@ sub generateCsvOutput {
      writeToFile( $csvFName, $oFormat);
 
      return $csvFName;
+
+}
+
+
+##-----------------------------------------------------------------------------
+## Unpack meta data
+##-----------------------------------------------------------------------------
+sub unpackStreamMetaData {
+   my ( $ttnDataRef, $cfgRef ) = @_;
+     
+   my $dt1 = DateTime->now( time_zone => 'UTC' );
+   my $i =0;
+
+   my $oFormat = "time,gws,rssi,snr, freq,\n";
+
+   # loop over the now decoded data structure
+   foreach my $key (sort {$a cmp $b} keys (%{$ttnDataRef})) {
+      $oFormat .= "$key,";
+      $oFormat .= "$ttnDataRef->{$key}{gateway_count},";
+      $oFormat .= "$ttnDataRef->{$key}{gateway_info}{0}{rssi},";
+      $oFormat .= "$ttnDataRef->{$key}{gateway_info}{0}{snr},";
+      $oFormat .= "$ttnDataRef->{$key}{gateway_info}{0}{frequency},";
+      if(exists $ttnDataRef->{$key}{gateway_info}{1}) {
+         $oFormat .= "$ttnDataRef->{$key}{gateway_info}{1}{rssi},";
+         $oFormat .= "$ttnDataRef->{$key}{gateway_info}{1}{snr},";
+         $oFormat .= "$ttnDataRef->{$key}{gateway_info}{1}{frequency},";
+      }
+      $oFormat .= "\n";
+
+   }
+   
+   my $csvFName =  "$cfgRef->{outdirectory}/stream_metadata_";
+   $csvFName    .= "_$cfgRef->{duration}";
+   $csvFName    .= "_" . getTimeForDataPacket();
+   $csvFName    .= ".csv";
+   printf("Writing data to $csvFName\n");
+   writeToFile( $csvFName, $oFormat);
+   return $csvFName;
 
 }
 
@@ -428,28 +393,96 @@ sub call_packetUnpack_006 {
 }
 
 ##-----------------------------------------------------------------------------
+## Unpack data packet 007
+##-----------------------------------------------------------------------------
+sub processLatLong {
+  my $latLong = shift;
+  $latLong =~ m/([0-9]+)([0-9]{2}\.[0-9]+)([a-zA-Z]{1})/;
+  my $dir     = $3;
+  my $seconds = $2;
+  my $minutes = $1;
+  print "... $latLong [ $seconds === $minutes ]";
+  my $result = ($seconds/60) + $minutes;
+  $dir = lc($dir);
+  $result = 0 - $result if ($dir =~ m/(?:s|w)/);
+  print "[ $result ]";
+  return $result;
+}
+sub call_packetUnpack_007 {
+   my ( $byteRef, $resRef, $device ) = @_;
+   
+   my %time;
+   my $packetCount  = 0;
+   my $packetLength = $byteRef->[1];
+
+   ## Get the time and calculate the offset for the time in the data buffer
+   ## Adjust the buffer for the packet header
+   my $dataOffset   = unpack_WindOpMinuteTime($byteRef, \%time);
+   $dataOffset += 2;
+   
+   printf ("call_packetUnpack_007 Length=%3d ", $packetLength);
+      
+   my $base = $dataOffset;
+   my $timeStr = $time{dt}->ymd('') . $time{dt}->hms('');
+
+
+   my $latt = "";
+   my $long = "";
+   for (my $i = 0; $i < 13; $i++) {
+      $latt .= (chr($byteRef->[$base + $i]));
+   }
+   $latt = processLatLong($latt);
+
+   for (my $i = 13; $i < 126; $i++) {
+      $long .= (chr($byteRef->[$base + $i]));
+   }
+   $long = processLatLong($long);
+   my $http = "https://www.google.co.uk/maps/\@$latt,$long,20z";
+
+   my $gis = GIS::Distance->new( );
+   my $distance = $gis->distance( 55.8592955,-3.1618687 => $latt,$long );
+    
+   print (" Distance = " . $distance->meters() . "\n");
+   print "load\n$http\n";
+
+   ##system("open $http");
+
+
+   $resRef->{$device}{$timeStr}{bv}   = 0.001 * (($byteRef->[$base + 26]) + ($byteRef->[$base + 27]<<8));
+   # printf("---------- %x lllll \n ", $resRef->{$device}{$timeStr}{hum});
+   # if (($resRef->{$device}{$timeStr}{hum} & 0x8000) == 0x8000) {
+      # $resRef->{$device}{$timeStr}{hum} = (~$resRef->{$device}{$timeStr}{hum}) & 0xffff;
+   # }     
+   # printf("---------- %x lllll \n ", $resRef->{$device}{$timeStr}{hum});
+
+}
+
+##-----------------------------------------------------------------------------
 ## Unpack all the packet data
 ##-----------------------------------------------------------------------------
 sub unpackWm868Data {
    my ( $ttnDataRef, $resRef, $device ) = @_;
      
    my $dt1 = DateTime->now( time_zone => 'UTC' );
+   my $i =0;
 
    # loop over the now decoded data structure
-   for (my $i=0; $i < (@$ttnDataRef) ; $i++) {
+   foreach my $key (sort {$a cmp $b} keys (%{$ttnDataRef})) {
+      my $dataRef = $ttnDataRef->{$key};
+      my $type = $dataRef->{bytes}[0];
 
-      printf("---Dev:%3s ID:%6d %s Type:%s\n", $ttnDataRef->[$i]->{device_id}, $i, $ttnDataRef->[$i]->{time}, $ttnDataRef->[$i]->{bytes}[0]);
-      my $type = $ttnDataRef->[$i]->{bytes}[0];
+      printf("---Bytes:%3s ID:%6d %s Type:%s\n", $ttnDataRef->{$key}{size}, $i++, $key, $type);
 
-      call_packetUnpack_004 ($ttnDataRef->[$i]->{bytes}, $resRef, $device) if($type == 4);
-      call_packetUnpack_005 ($ttnDataRef->[$i]->{bytes}, $resRef, $device) if($type == 5);
-      call_packetUnpack_006 ($ttnDataRef->[$i]->{bytes}, $resRef, $device) if($type == 6);
+      call_packetUnpack_004 ($dataRef->{bytes}, $resRef, $device) if($type == 4);
+      call_packetUnpack_005 ($dataRef->{bytes}, $resRef, $device) if($type == 5);
+      call_packetUnpack_006 ($dataRef->{bytes}, $resRef, $device) if($type == 6);
+      call_packetUnpack_007 ($dataRef->{bytes}, $resRef, $device) if($type == 7);
 
    }
    
    my $dt2 = DateTime->now( time_zone => 'UTC' ) - $dt1;
-   my $length = @$ttnDataRef;
-   printf("---Unpack WM868 data packets = %d in %ds\n", $length, $dt2->seconds);
+
+   printf("---Unpack WM868 data packets = %d in %ds\n", $i, $dt2->seconds);
 
 }
 
@@ -460,72 +493,48 @@ sub unpackWm868Data {
 ##-----------------------------------------------------------------------------
 
 ##-----------------------------------------------------------------------------
-## Functions to build our CURL command line to query the SWAGGER REST API on
-## TTN. We run these as *NIX commands at present. We can make a more X platform
-## pure perl implementation at some point
-##-----------------------------------------------------------------------------
-sub retTtndDevices {
-  my $cmd = retBaseTtnCommand(shift);
-  $cmd .= "devices'";
-  return $cmd;
-}
-
-sub retTtndQuery {
-   my $cfg = shift;
-   my $cmd = retBaseTtnCommand($cfg);
-   $cmd .= "query/$cfg->{selectDevice}";
-   $cmd .= "?last=$cfg->{duration}";
-   $cmd .= "'";
-   return $cmd;
-}
-
-sub retBaseTtnCommand {
-  my $cfgRef = shift;
-
-  #----------------------------------------------------------------------------
-  # If the config file does not exist, print some help and bail out
-  #----------------------------------------------------------------------------
-  if (! -e $cfgRef->{ttnkeys}) {
-    print ("Keys file $cfgRef->{ttnkeys} does not exist. You need to create and populate with something like
-  {
-    \"authKey\": \"ttn-account-v.........\",
-    \"appPath\": \"https://...........thethingsnetwork.org/..../\"
-  }
-Log into TTN and run a CURL request from the SWAGGER integration. This will give you the information you need.
-These values are simply used to build the CURL command line.
-");
-    exit();
-  }
-  
-  #----------------------------------------------------------------------------
-  # Read in the App keys from the config file
-  my $jsonStr = readFileContents($cfgRef->{ttnkeys});
-  my $ttnConfig = decode_json( $jsonStr );
-
-  # Not the -s to reduce the curl progress info, otherwise this ends up in the data
-  # Build a string of the command we are going to execute.
-  my $res = "curl -s -X GET --header 'Accept: application/json' --header 'Authorization: key ";
-  $res .= $ttnConfig->{authKey};
-  $res .= "' '";
-  $res .= $ttnConfig->{appPath};
-  print "\n$res\n\n" if $cfgRef->{curl};
-  return $res;
-}
-
-##-----------------------------------------------------------------------------
 ## This function fetchs the data from the TTN 
 ##-----------------------------------------------------------------------------
-sub queryTtndReturnHashRef {
+sub unPackNodeCsvFile {
   my ( $cfgRef ) = @_;
 
-     ## Run the CURL command to get data from a device.
-     my $jsonStr = runOsCommandGetOutput(retTtndQuery($cfgRef));
-     
-     print $jsonStr if $cfgRef->{dump};
-     exit() if $cfgRef->{curl};
+  my $fileString = readFileContents($cfgRef->{file});
+    
+  my %results;
+  my $count = 3;
+  my @keys;
+  foreach my $line (split ("\n", $fileString)) {
+     # print "$line\n";
+     if ($line =~ s/,l,([0-9]+),d,(.*)//) {
+           print "$1\n";
+           print "$2\n";
+           print "$line\n";
+           my @bytes = split(m/,/, $2);
+           my @data = split(m/,/, $line);
+           my $date = $data[0];
+           print "@data\n";
+           $results{$date}{size} = $1;
+           @{$results{$date}{bytes}} = @bytes;
 
-     ## Convert the JSON string to a PERL data structure
-     return decode_json( $jsonStr );
+
+         # if ($count-- > 0) {
+  
+            # $results{$date}{size} = $1;
+            # $results{$date}{json} = $3;
+  
+            # $results{$date}{json} =~ s/^[\"]//g;
+            # $results{$date}{json} =~ s/\"$//;
+            # $results{$date}{json} =~ s/\"\"/\"/g;
+  
+  
+         # }
+     } else {
+        @keys = split (m/,/, lc($line));
+        print "@keys\n";
+     }
+  }
+
+  return \%results;
 
 }
 
@@ -535,6 +544,7 @@ sub queryTtndReturnHashRef {
 sub plotData {
   my ( $outFile ) = @_;
   my $command = "python $Bin/s3_wm_csv_plot.py -c $outFile";
+  print("$command\n");
   runOsCommandGetOutput($command);
 }
 
@@ -550,19 +560,20 @@ sub convertAllRawBase64Packets {
    
    my $dt1 = DateTime->now( time_zone => 'UTC' );
 
-   my $numberOfPackets = @$ttnDataRef;
+   my $numberOfPackets = keys(%{$ttnDataRef});
 
-   for (my $i=0; $i < $numberOfPackets ; $i++) { 
+   # for (my $i=0; $i < $numberOfPackets ; $i++) { 
+   foreach my $key (sort {$a cmp $b} keys (%{$ttnDataRef})) {
 
       ## This line does decode. Lets store the decoded string
-      $ttnDataRef->[$i]->{decoded} = base64StrToHex ($ttnDataRef->[$i]->{raw});
+      $ttnDataRef->{$key}{decoded} = base64StrToHex ($ttnDataRef->{$key}{data});
        
       ## Now break the decoded string into a Byte array that we can use.
       ## To ease debug we are going to keep this as ASCII hex
-      $ttnDataRef->[$i]->{bytes} = []; ## Create the array element so we can pass a reference to it
+      $ttnDataRef->{$key}{bytes} = []; ## Create the array element so we can pass a reference to it
 
       ## Do the breakdown. Best to do this here as we are looping over the packets 
-      breakHexStringIntoHexByteArray($ttnDataRef->[$i]->{decoded}, $ttnDataRef->[$i]->{bytes});
+      breakHexStringIntoHexByteArray($ttnDataRef->{$key}{decoded}, $ttnDataRef->{$key}{bytes});
 
    }
    my $dt2 = DateTime->now( time_zone => 'UTC' ) - $dt1;
